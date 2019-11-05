@@ -1,6 +1,7 @@
 var XML_HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n';
 var attregexg=/([^"\s?>\/]+)\s*=\s*((?:")([^"]*)(?:")|(?:')([^']*)(?:')|([^'">\s]+))/g;
 var tagregex=/<[\/\?]?[a-zA-Z0-9:]+(?:\s+[^"\s?>\/]+\s*=\s*(?:"[^"]*"|'[^']*'|[^'">\s=]+))*\s?[\/\?]?>/g;
+
 if(!(XML_HEADER.match(tagregex))) tagregex = /<[^>]*>/g;
 var nsregex=/<\w*:/, nsregex2 = /<(\/?)\w+:/;
 function parsexmltag(tag/*:string*/, skip_root/*:?boolean*/)/*:any*/ {
@@ -21,11 +22,13 @@ function parsexmltag(tag/*:string*/, skip_root/*:?boolean*/)/*:any*/ {
 		if(j===q.length) {
 			if(q.indexOf("_") > 0) q = q.slice(0, q.indexOf("_")); // from ods
 			z[q] = v;
+			z[q.toLowerCase()] = v;
 		}
 		else {
 			var k = (j===5 && q.slice(0,5)==="xmlns"?"xmlns":"")+q.slice(j+1);
 			if(z[k] && q.slice(j-3,j) == "ext") continue; // from ods
 			z[k] = v;
+			z[k.toLowerCase()] = v;
 		}
 	}
 	return z;
@@ -64,7 +67,7 @@ function escapexmltag(text/*:string*/)/*:string*/{ return escapexml(text).replac
 var htmlcharegex = /[\u0000-\u001f]/g;
 function escapehtml(text/*:string*/)/*:string*/{
 	var s = text + '';
-	return s.replace(decregex, function(y) { return rencoding[y]; }).replace(htmlcharegex,function(s) { return "&#x" + ("000"+s.charCodeAt(0).toString(16)).slice(-4) + ";"; });
+	return s.replace(decregex, function(y) { return rencoding[y]; }).replace(/\n/g, "<br/>").replace(htmlcharegex,function(s) { return "&#x" + ("000"+s.charCodeAt(0).toString(16)).slice(-4) + ";"; });
 }
 
 function escapexlml(text/*:string*/)/*:string*/{
@@ -135,7 +138,7 @@ var utf8write/*:StringConv*/ = function(orig/*:string*/)/*:string*/ {
 
 if(has_buf) {
 	var utf8readb = function utf8readb(data) {
-		var out = new Buffer(2*data.length), w, i, j = 1, k = 0, ww=0, c;
+		var out = Buffer.alloc(2*data.length), w, i, j = 1, k = 0, ww=0, c;
 		for(i = 0; i < data.length; i+=j) {
 			j = 1;
 			if((c=data.charCodeAt(i)) < 128) w = c;
@@ -152,11 +155,10 @@ if(has_buf) {
 	};
 	var corpus = "foo bar baz\u00e2\u0098\u0083\u00f0\u009f\u008d\u00a3";
 	if(utf8read(corpus) == utf8readb(corpus)) utf8read = utf8readb;
-	// $FlowIgnore
-	var utf8readc = function utf8readc(data) { return Buffer(data, 'binary').toString('utf8'); };
+	var utf8readc = function utf8readc(data) { return Buffer_from(data, 'binary').toString('utf8'); };
 	if(utf8read(corpus) == utf8readc(corpus)) utf8read = utf8readc;
 
-	utf8write = function(data) { return new Buffer(data, 'utf8').toString("binary"); };
+	utf8write = function(data) { return Buffer_from(data, 'utf8').toString("binary"); };
 }
 
 // matches <foo>...</foo> extracts content
@@ -175,7 +177,19 @@ var htmldecode/*:{(s:string):string}*/ = (function() {
 		['quot', '"'], ['apos', "'"], ['gt',   '>'], ['lt',   '<'], ['amp',  '&']
 	].map(function(x/*:[string, string]*/) { return [new RegExp('&' + x[0] + ';', "g"), x[1]]; });
 	return function htmldecode(str/*:string*/)/*:string*/ {
-		var o = str.trim().replace(/\s+/g, " ").replace(/<\s*[bB][rR]\s*\/?>/g,"\n").replace(/<[^>]*>/g,"");
+		var o = str
+				// Remove new lines and spaces from start of content
+				.replace(/^[\t\n\r ]+/, "")
+				// Remove new lines and spaces from end of content
+				.replace(/[\t\n\r ]+$/,"")
+				// Added line which removes any white space characters after and before html tags
+				.replace(/>\s+/g,">").replace(/\s+</g,"<")
+				// Replace remaining new lines and spaces with space
+				.replace(/[\t\n\r ]+/g, " ")
+				// Replace <br> tags with new lines
+				.replace(/<\s*[bB][rR]\s*\/?>/g,"\n")
+				// Strip HTML elements
+				.replace(/<[^>]*>/g,"");
 		for(var i = 0; i < entities.length; ++i) o = o.replace(entities[i][0], entities[i][1]);
 		return o;
 	};

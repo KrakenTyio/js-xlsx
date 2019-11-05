@@ -1,8 +1,11 @@
 var current_codepage = 1200, current_ansi = 1252;
 /*:: declare var cptable:any; */
-/*global cptable:true */
+/*global cptable:true, window */
 if(typeof module !== "undefined" && typeof require !== 'undefined') {
-	if(typeof cptable === 'undefined') global.cptable = require('./dist/cpexcel.js');
+	if(typeof cptable === 'undefined') {
+		if(typeof global !== 'undefined') global.cptable = require('./dist/cpexcel.js');
+		else if(typeof window !== 'undefined') window.cptable = require('./dist/cpexcel.js');
+	}
 }
 
 var VALID_ANSI = [ 874, 932, 936, 949, 950 ];
@@ -59,8 +62,9 @@ var debom = function(data/*:string*/)/*:string*/ {
 };
 
 var _getchar = function _gc1(x/*:number*/)/*:string*/ { return String.fromCharCode(x); };
+var _getansi = function _ga1(x/*:number*/)/*:string*/ { return String.fromCharCode(x); };
 if(typeof cptable !== 'undefined') {
-	set_cp = function(cp/*:number*/) { current_codepage = cp; };
+	set_cp = function(cp/*:number*/) { current_codepage = cp; set_ansi(cp); };
 	debom = function(data/*:string*/) {
 		if(data.charCodeAt(0) === 0xFF && data.charCodeAt(1) === 0xFE) { return cptable.utils.decode(1200, char_codes(data.slice(2))); }
 		return data;
@@ -68,5 +72,8 @@ if(typeof cptable !== 'undefined') {
 	_getchar = function _gc2(x/*:number*/)/*:string*/ {
 		if(current_codepage === 1200) return String.fromCharCode(x);
 		return cptable.utils.decode(current_codepage, [x&255,x>>8])[0];
+	};
+	_getansi = function _ga2(x/*:number*/)/*:string*/ {
+		return cptable.utils.decode(current_ansi, [x])[0];
 	};
 }

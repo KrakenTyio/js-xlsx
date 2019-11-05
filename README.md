@@ -6,7 +6,7 @@ Emphasis on parsing and writing robustness, cross-format feature compatibility
 with a unified JS representation, and ES3/ES5 browser compatibility back to IE6.
 
 This is the community version.  We also offer a pro version with performance
-enhancements, additional features by request, and dedicated support.
+enhancements, additional features like styling, and dedicated support.
 
 
 [**Pro Version**](http://sheetjs.com/pro)
@@ -20,8 +20,6 @@ enhancements, additional features by request, and dedicated support.
 [**Source Code**](http://git.io/xlsx)
 
 [**Issues and Bug Reports**](https://github.com/sheetjs/js-xlsx/issues)
-
-[**Other General Support Issues**](https://discourse.sheetjs.com)
 
 [**File format support for known spreadsheet data formats:**](#file-formats)
 
@@ -43,7 +41,6 @@ enhancements, additional features by request, and dedicated support.
 [![Coverage Status](http://img.shields.io/coveralls/SheetJS/js-xlsx/master.svg)](https://coveralls.io/r/SheetJS/js-xlsx?branch=master)
 [![Dependencies Status](https://david-dm.org/sheetjs/js-xlsx/status.svg)](https://david-dm.org/sheetjs/js-xlsx)
 [![npm Downloads](https://img.shields.io/npm/dt/xlsx.svg)](https://npmjs.org/package/xlsx)
-[![ghit.me](https://ghit.me/badge.svg?repo=sheetjs/js-xlsx)](https://ghit.me/repo/sheetjs/js-xlsx)
 [![Analytics](https://ga-beacon.appspot.com/UA-36810333-1/SheetJS/js-xlsx?pixel)](https://github.com/SheetJS/js-xlsx)
 
 ## Table of Contents
@@ -191,13 +188,15 @@ The [`demos` directory](demos/) includes sample projects for:
 
 **Frameworks and APIs**
 - [`angularjs`](demos/angular/)
-- [`angular 2 / 4 / 5 and ionic`](demos/angular2/)
+- [`angular 2 / 4 / 5 / 6 and ionic`](demos/angular2/)
+- [`knockout`](demos/knockout/)
 - [`meteor`](demos/meteor/)
 - [`react and react-native`](demos/react/)
 - [`vue 2.x and weex`](demos/vue/)
 - [`XMLHttpRequest and fetch`](demos/xhr/)
 - [`nodejs server`](demos/server/)
 - [`databases and key/value stores`](demos/database/)
+- [`typed arrays and math`](demos/array/)
 
 **Bundlers and Tooling**
 - [`browserify`](demos/browserify/)
@@ -212,10 +211,12 @@ The [`demos` directory](demos/) includes sample projects for:
 **Platforms and Integrations**
 - [`electron application`](demos/electron/)
 - [`nw.js application`](demos/nwjs/)
+- [`Chrome / Chromium extensions`](demos/chrome/)
 - [`Adobe ExtendScript`](demos/extendscript/)
 - [`Headless Browsers`](demos/headless/)
 - [`canvas-datagrid`](demos/datagrid/)
 - [`Swift JSC and other engines`](demos/altjs/)
+- [`"serverless" functions`](demos/function/)
 - [`internet explorer`](demos/oldie/)
 
 ### Optional Modules
@@ -236,6 +237,8 @@ be included directly:
 An appropriate version for each dependency is included in the dist/ directory.
 
 The complete single-file version is generated at `dist/xlsx.full.min.js`
+
+A slimmer build with XLSX / HTML support is generated at `dist/xlsx.mini.min.js`
 
 Webpack and Browserify builds include optional modules by default.  Webpack can
 be configured to remove support with `resolve.alias`:
@@ -295,10 +298,14 @@ operations generally should be straightforward to implement.
 
 Excel pushes the XLSX format as default starting in Excel 2007.  However, there
 are other formats with more appealing properties.  For example, the XLSB format
-is spiritually similar to XLSX but files often tend up taking less than half the
+is spiritually similar to XLSX but files often end up taking less than half the
 space and open much faster!  Even though an XLSX writer is available, other
 format writers are available so users can take advantage of the unique
 characteristics of each format.
+
+The primary focus of the Community Edition is correct data interchange, focused
+on extracting data from any compatible data representation and exporting data in
+various formats suitable for any third party interface.
 
 </details>
 
@@ -356,11 +363,11 @@ Multiple tables on a web page can be converted to individual worksheets:
 var workbook = XLSX.utils.book_new();
 
 /* convert table 'table1' to worksheet named "Sheet1" */
-var ws1 = XLSX.utils.table_to_book(document.getElementById('table1'));
+var ws1 = XLSX.utils.table_to_sheet(document.getElementById('table1'));
 XLSX.utils.book_append_sheet(workbook, ws1, "Sheet1");
 
 /* convert table 'table2' to worksheet named "Sheet2" */
-var ws2 = XLSX.utils.table_to_book(document.getElementById('table2'));
+var ws2 = XLSX.utils.table_to_sheet(document.getElementById('table2'));
 XLSX.utils.book_append_sheet(workbook, ws2, "Sheet2");
 
 /* workbook now has 2 worksheets */
@@ -405,24 +412,20 @@ req.send();
 <details>
   <summary><b>Browser drag-and-drop</b> (click to show)</summary>
 
-Drag-and-drop uses the HTML5 `FileReader` API, loading the data with
-`readAsBinaryString` or `readAsArrayBuffer`.  Since not all browsers support the
-full `FileReader` API, dynamic feature tests are highly recommended.
+Drag-and-drop uses the HTML5 `FileReader` API.
 
 ```js
-var rABS = true; // true: readAsBinaryString ; false: readAsArrayBuffer
 function handleDrop(e) {
   e.stopPropagation(); e.preventDefault();
   var files = e.dataTransfer.files, f = files[0];
   var reader = new FileReader();
   reader.onload = function(e) {
-    var data = e.target.result;
-    if(!rABS) data = new Uint8Array(data);
-    var workbook = XLSX.read(data, {type: rABS ? 'binary' : 'array'});
+    var data = new Uint8Array(e.target.result);
+    var workbook = XLSX.read(data, {type: 'array'});
 
     /* DO SOMETHING WITH workbook HERE */
   };
-  if(rABS) reader.readAsBinaryString(f); else reader.readAsArrayBuffer(f);
+  reader.readAsArrayBuffer(f);
 }
 drop_dom_element.addEventListener('drop', handleDrop, false);
 ```
@@ -436,18 +439,16 @@ Data from file input elements can be processed using the same `FileReader` API
 as in the drag-and-drop example:
 
 ```js
-var rABS = true; // true: readAsBinaryString ; false: readAsArrayBuffer
 function handleFile(e) {
   var files = e.target.files, f = files[0];
   var reader = new FileReader();
   reader.onload = function(e) {
-    var data = e.target.result;
-    if(!rABS) data = new Uint8Array(data);
-    var workbook = XLSX.read(data, {type: rABS ? 'binary' : 'array'});
+    var data = new Uint8Array(e.target.result);
+    var workbook = XLSX.read(data, {type: 'array'});
 
     /* DO SOMETHING WITH workbook HERE */
   };
-  if(rABS) reader.readAsBinaryString(f); else reader.readAsArrayBuffer(f);
+  reader.readAsArrayBuffer(f);
 }
 input_dom_element.addEventListener('change', handleFile, false);
 ```
@@ -586,7 +587,7 @@ This example uses [`XLSX.utils.aoa_to_sheet`](#array-of-arrays-input) to make a
 sheet and `XLSX.utils.book_append_sheet` to append the sheet to the workbook:
 
 ```js
-var new_ws_name = "SheetJS";
+var ws_name = "SheetJS";
 
 /* make worksheet */
 var ws_data = [
@@ -784,6 +785,7 @@ Stream.  They are only exposed in NodeJS.
 
 - `XLSX.stream.to_csv` is the streaming version of `XLSX.utils.sheet_to_csv`.
 - `XLSX.stream.to_html` is the streaming version of `XLSX.utils.sheet_to_html`.
+- `XLSX.stream.to_json` is the streaming version of `XLSX.utils.sheet_to_json`.
 
 <details>
   <summary><b>nodejs convert to CSV and write file</b> (click to show)</summary>
@@ -792,6 +794,22 @@ Stream.  They are only exposed in NodeJS.
 var output_file_name = "out.csv";
 var stream = XLSX.stream.to_csv(worksheet);
 stream.pipe(fs.createWriteStream(output_file_name));
+```
+
+</details>
+
+<details>
+  <summary><b>nodejs write JSON stream to screen</b> (click to show)</summary>
+
+```js
+/* to_json returns an object-mode stream */
+var stream = XLSX.stream.to_json(worksheet, {raw:true});
+
+/* the following stream converts JS objects to text via JSON.stringify */
+var conv = new Transform({writableObjectMode:true});
+conv._transform = function(obj, e, cb){ cb(null, JSON.stringify(obj) + "\n"); };
+
+stream.pipe(conv); conv.pipe(process.stdout);
 ```
 
 </details>
@@ -1547,6 +1565,17 @@ ws.A1.c.push({a:"SheetJS", t:"I'm a little comment, short and stout!"});
 Note: XLSB enforces a 54 character limit on the Author name.  Names longer than
 54 characters may cause issues with other formats.
 
+To mark a comment as normally hidden, set the `hidden` property:
+
+```js
+if(!ws.A1.c) ws.A1.c = [];
+ws.A1.c.push({a:"SheetJS", t:"This comment is visible"});
+
+if(!ws.A2.c) ws.A2.c = [];
+ws.A2.c.hidden = true;
+ws.A2.c.push({a:"SheetJS", t:"This comment will be hidden"});
+```
+
 #### Sheet Visibility
 
 Excel enables hiding sheets in the lower tab bar.  The sheet data is stored in
@@ -1770,6 +1799,7 @@ The exported `write` and `writeFile` functions accept an options argument:
 |`compression`|  `false` | Use ZIP compression for ZIP-based formats **        |
 |`Props`      |          | Override workbook properties when writing **        |
 |`themeXLSX`  |          | Override theme XML when writing XLSX/XLSB/XLSM **   |
+|`ignoreEC`   |   `true` | Suppress "number as text" errors **                 |
 
 - `bookSST` is slower and more memory intensive, but has better compatibility
   with older versions of iOS Numbers
@@ -1782,6 +1812,9 @@ The exported `write` and `writeFile` functions accept an options argument:
   the [Workbook File Properties](#workbook-file-properties) section.
 - if specified, the string from `themeXLSX` will be saved as the primary theme
   for XLSX/XLSB/XLSM files (to `xl/theme/theme1.xml` in the ZIP)
+- Due to a bug in the program, some features like "Text to Columns" will crash
+  Excel on worksheets where error conditions are ignored.  The writer will mark
+  files to ignore the error by default.  Set `ignoreEC` to `false` to suppress.
 
 ### Supported Output Formats
 
@@ -2043,9 +2076,11 @@ Both functions accept options arguments:
 
 | Option Name |  Default | Description                                         |
 | :---------- | :------: | :-------------------------------------------------- |
+|`raw`        |          | If true, every cell will hold raw strings           |
 |`dateNF`     |  FMT 14  | Use specified date format in string output          |
 |`cellDates`  |  false   | Store dates as type `d` (default is `n`)            |
-|`raw`        |          | If true, every cell will hold raw strings           |
+|`sheetRows`  |    0     | If >0, read the first `sheetRows` rows of the table |
+|`display`    |  false   | If true, hidden rows and cells will not be parsed   |
 
 
 <details>
@@ -2164,7 +2199,7 @@ takes an options argument:
 
 | Option Name |  Default | Description                                         |
 | :---------- | :------: | :-------------------------------------------------- |
-|`raw`        | `false`  | Use raw values (true) or formatted strings (false)  |
+|`raw`        | `true`   | Use raw values (true) or formatted strings (false)  |
 |`range`      | from WS  | Override Range (see table below)                    |
 |`header`     |          | Control output format (see table below)             |
 |`dateNF`     |  FMT 14  | Use specified date format in string output          |
@@ -2237,12 +2272,12 @@ Example showing the effect of `raw`:
 ```js
 > ws['A2'].w = "3";                          // set A2 formatted string value
 
-> XLSX.utils.sheet_to_json(ws, {header:1});
+> XLSX.utils.sheet_to_json(ws, {header:1, raw:false});
 [ [ 'S', 'h', 'e', 'e', 't', 'J', 'S' ],
   [ '3', '2', '3', '4', '5', '6', '7' ],     // <-- A2 uses the formatted string
   [ '2', '3', '4', '5', '6', '7', '8' ] ]
 
-> XLSX.utils.sheet_to_json(ws, {header:1, raw:true});
+> XLSX.utils.sheet_to_json(ws, {header:1});
 [ [ 'S', 'h', 'e', 'e', 't', 'J', 'S' ],
   [ 1, 2, 3, 4, 5, 6, 7 ],                   // <-- A2 uses the raw value
   [ 2, 3, 4, 5, 6, 7, 8 ] ]
@@ -2281,6 +2316,20 @@ Despite the library name `xlsx`, it supports numerous spreadsheet file formats:
 | HTML Tables                                                  |  :o:  |  :o:  |
 | Rich Text Format tables (RTF)                                |       |  :o:  |
 | Ethercalc Record Format (ETH)                                |  :o:  |  :o:  |
+
+Features not supported by a given file format will not be written.  Formats with
+range limits will be silently truncated:
+
+| Format                                    | Last Cell  | Max Cols | Max Rows |
+|:------------------------------------------|:-----------|---------:|---------:|
+| Excel 2007+ XML Formats (XLSX/XLSM)       | XFD1048576 |    16384 |  1048576 |
+| Excel 2007+ Binary Format (XLSB BIFF12)   | XFD1048576 |    16384 |  1048576 |
+| Excel 97-2004 (XLS BIFF8)                 | IV65536    |      256 |    65536 |
+| Excel 5.0/95 (XLS BIFF5)                  | IV16384    |      256 |    16384 |
+| Excel 2.0/2.1 (XLS BIFF2)                 | IV16384    |      256 |    16384 |
+
+Excel 2003 SpreadsheetML range limits are governed by the version of Excel and
+are not enforced by the writer.
 
 ### Excel 2007+ XML (XLSX/XLSM)
 

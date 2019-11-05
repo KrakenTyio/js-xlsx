@@ -219,6 +219,12 @@ export interface WritingOptions extends CommonOptions {
      */
     compression?: boolean;
 
+    /**
+     * Suppress "number stored as text" errors in generated files
+     * @default true
+     */
+    ignoreEC?: boolean;
+
     /** Override workbook properties on save */
     Props?: Properties;
 }
@@ -234,11 +240,11 @@ export interface WorkBook {
     /** Ordered list of the sheet names in the workbook */
     SheetNames: string[];
 
-    /**
-     * an object storing the standard properties. wb.Custprops stores custom properties.
-     * Since the XLS standard properties deviate from the XLSX standard, XLS parsing stores core properties in both places.
-     */
+    /** Standard workbook Properties */
     Props?: FullProperties;
+
+    /** Custom workbook Properties */
+    Custprops?: object;
 
     Workbook?: WBProps;
 
@@ -657,6 +663,15 @@ export interface SheetJSONOpts extends JSON2SheetOpts, OriginOption {}
 export interface Table2SheetOpts extends CommonOptions, DateNFOption {
     /* If true, plaintext parsing will not parse values */
     raw?: boolean;
+
+    /**
+     * If >0, read the first sheetRows rows
+     * @default 0
+     */
+    sheetRows?: number;
+
+    /** If true, hidden rows and cells will not be parsed */
+    display?: boolean;
 }
 
 /** General utilities */
@@ -790,4 +805,6 @@ export interface StreamUtils {
     to_csv(sheet: WorkSheet, opts?: Sheet2CSVOpts): any;
     /** HTML output stream, generate one line at a time */
     to_html(sheet: WorkSheet, opts?: Sheet2HTMLOpts): any;
+    /** JSON object stream, generate one row at a time */
+    to_json(sheet: WorkSheet, opts?: Sheet2JSONOpts): any;
 }

@@ -55,6 +55,12 @@ function write_ws_biff2_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:n
 function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts/*::, wb:Workbook*/) {
 	var dense = Array.isArray(ws);
 	var range = safe_decode_range(ws['!ref'] || "A1"), ref/*:string*/, rr = "", cols/*:Array<string>*/ = [];
+	if(range.e.c > 0xFF || range.e.r > 0x3FFF) {
+		if(opts.WTF) throw new Error("Range " + (ws['!ref'] || "A1") + " exceeds format limit A1:IV16384");
+		range.e.c = Math.min(range.e.c, 0xFF);
+		range.e.r = Math.min(range.e.c, 0x3FFF);
+		ref = encode_range(range);
+	}
 	for(var R = range.s.r; R <= range.e.r; ++R) {
 		rr = encode_row(R);
 		for(var C = range.s.c; C <= range.e.c; ++C) {
@@ -114,7 +120,7 @@ function write_FEAT(ba, ws) {
 	o.write_shift(4, 0x868); o.write_shift(4, 0); o.write_shift(4, 0);
 	o.write_shift(2, 3); o.write_shift(1, 0); o.write_shift(4, 0);
 	o.write_shift(2, 1); o.write_shift(4, 4); o.write_shift(2, 0);
-	write_Ref8U(safe_decode_range(ws['!ref']), o);
+	write_Ref8U(safe_decode_range(ws['!ref']||"A1"), o);
 	o.write_shift(4, 4);
 	write_biff_rec(ba, "Feat", o);
 }
@@ -137,19 +143,27 @@ function write_ws_biff8_hlinks(ba/*:BufArray*/, ws) {
 
 function write_ws_biff8_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*/, opts) {
 	var os = 16 + get_cell_style(opts.cellXfs, cell, opts);
-	if(cell.v != null) switch(cell.t) {
+	if(cell.v == null && !cell.bf) {
+		write_biff_rec(ba, "Blank", write_XLSCell(R, C, os));
+		return;
+	}
+	if(cell.bf) write_biff_rec(ba, "Formula", write_Formula(cell, R, C, opts, os));
+	else switch(cell.t) {
 		case 'd': case 'n':
 			var v = cell.t == 'd' ? datenum(parseDate(cell.v)) : cell.v;
 			/* TODO: emit RK as appropriate */
 			write_biff_rec(ba, "Number", write_Number(R, C, v, os, opts));
-			return;
-		case 'b': case 'e': write_biff_rec(ba, 0x0205, write_BoolErr(R, C, cell.v, os, opts, cell.t)); return;
+			break;
+		case 'b': case 'e':
+			write_biff_rec(ba, 0x0205, write_BoolErr(R, C, cell.v, os, opts, cell.t));
+			break;
 		/* TODO: codepage, sst */
 		case 's': case 'str':
 			write_biff_rec(ba, "Label", write_Label(R, C, cell.v, os, opts));
-			return;
+			break;
+		default:
+			write_biff_rec(ba, "Blank", write_XLSCell(R, C, os));
 	}
-	write_biff_rec(ba, "Blank", write_XLSCell(R, C, os));
 }
 
 /* [MS-XLS] 2.1.7.20.5 */
@@ -159,11 +173,18 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 	var _WB/*:WBWBProps*/ = ((wb||{}).Workbook||{}/*:any*/);
 	var _sheet/*:WBWSProp*/ = ((_WB.Sheets||[])[idx]||{}/*:any*/);
 	var dense = Array.isArray(ws);
+	var b8 = opts.biff == 8;
 	var ref/*:string*/, rr = "", cols/*:Array<string>*/ = [];
 	var range = safe_decode_range(ws['!ref'] || "A1");
-	var b8 = opts.biff == 8;
+	var MAX_ROWS = b8 ? 65536 : 16384;
+	if(range.e.c > 0xFF || range.e.r >= MAX_ROWS) {
+		if(opts.WTF) throw new Error("Range " + (ws['!ref'] || "A1") + " exceeds format limit A1:IV16384");
+		range.e.c = Math.min(range.e.c, 0xFF);
+		range.e.r = Math.min(range.e.c, MAX_ROWS-1);
+	}
+
 	write_biff_rec(ba, 0x0809, write_BOF(wb, 0x10, opts));
-	/* ... */
+	/* [Uncalced] Index */
 	write_biff_rec(ba, "CalcMode", writeuint16(1));
 	write_biff_rec(ba, "CalcCount", writeuint16(100));
 	write_biff_rec(ba, "CalcRefMode", writebool(true));
@@ -174,11 +195,13 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 	write_biff_rec(ba, "PrintGrid", writebool(false));
 	write_biff_rec(ba, "GridSet", writeuint16(1));
 	write_biff_rec(ba, "Guts", write_Guts([0,0]));
-	/* ... */
+	/* DefaultRowHeight WsBool [Sync] [LPr] [HorizontalPageBreaks] [VerticalPageBreaks] */
+	/* Header (string) */
+	/* Footer (string) */
 	write_biff_rec(ba, "HCenter", writebool(false));
 	write_biff_rec(ba, "VCenter", writebool(false));
 	/* ... */
-	write_biff_rec(ba, "Dimensions", write_Dimensions(range, opts));
+	write_biff_rec(ba, 0x200, write_Dimensions(range, opts));
 	/* ... */
 
 	if(b8) ws['!links'] = [];
@@ -199,13 +222,13 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 	if(b8 && _WB.Views) write_biff_rec(ba, "Window2", write_Window2(_WB.Views[0]));
 	/* ... */
 	if(b8 && (ws['!merges']||[]).length) write_biff_rec(ba, "MergeCells", write_MergeCells(ws['!merges']));
-	/* ... */
+	/* [LRng] *QUERYTABLE [PHONETICINFO] CONDFMTS */
 	if(b8) write_ws_biff8_hlinks(ba, ws);
-	/* ... */
+	/* [DVAL] */
 	write_biff_rec(ba, "CodeName", write_XLUnicodeString(cname, opts));
-	/* ... */
+	/* *WebPub *CellWatch [SheetExt] */
 	if(b8) write_FEAT(ba, ws);
-	/* ... */
+	/* *FEAT11 *RECORD12 */
 	write_biff_rec(ba, "EOF");
 	return ba.end();
 }
@@ -225,16 +248,22 @@ function write_biff8_global(wb/*:Workbook*/, bufs, opts/*:WriteOpts*/) {
 	if(b5) write_biff_rec(A, "ToolbarEnd");
 	write_biff_rec(A, "InterfaceEnd");
 	write_biff_rec(A, "WriteAccess", write_WriteAccess("SheetJS", opts));
+	/* [FileSharing] */
 	write_biff_rec(A, "CodePage", writeuint16(b8 ? 0x04b0 : 0x04E4));
+	/* *2047 Lel */
 	if(b8) write_biff_rec(A, "DSF", writeuint16(0));
 	if(b8) write_biff_rec(A, "Excel9File");
 	write_biff_rec(A, "RRTabId", write_RRTabId(wb.SheetNames.length));
+	if(b8 && wb.vbaraw) write_biff_rec(A, "ObProj");
+	/* [ObNoMacros] */
 	if(b8 && wb.vbaraw) {
-		write_biff_rec(A, "ObProj");
 		var cname/*:string*/ = _wb.CodeName || "ThisWorkbook";
 		write_biff_rec(A, "CodeName", write_XLUnicodeString(cname, opts));
 	}
 	write_biff_rec(A, "BuiltInFnGroupCount", writeuint16(0x11));
+	/* *FnGroupName *FnGrp12 */
+	/* *Lbl */
+	/* [OleObjectSize] */
 	write_biff_rec(A, "WinProtect", writebool(false));
 	write_biff_rec(A, "Protect", writebool(false));
 	write_biff_rec(A, "Password", writeuint16(0));
@@ -256,8 +285,11 @@ function write_biff8_global(wb/*:Workbook*/, bufs, opts/*:WriteOpts*/) {
 	var a = A.end();
 
 	var C = buf_array();
+	/* METADATA [MTRSettings] [ForceFullCalculation] */
 	if(b8) write_biff_rec(C, "Country", write_Country());
+	/* *SUPBOOK *LBL *RTD [RecalcId] *HFPicture *MSODRAWINGGROUP */
 	/* BIFF8: [SST *Continue] ExtSST */
+	/* *WebPub [WOpt] [CrErr] [BookExt] *FeatHdr *DConn [THEME] [CompressPictures] [Compat12] [GUIDTypeLib] */
 	write_biff_rec(C, "EOF");
 	var c = C.end();
 
@@ -295,9 +327,14 @@ function write_biff8_buf(wb/*:Workbook*/, opts/*:WriteOpts*/) {
 		o.revssf = evert_num(wb.SSF); o.revssf[wb.SSF[65535]] = 0;
 		o.ssf = wb.SSF;
 	}
-	o.cellXfs = [];
+
 	o.Strings = /*::((*/[]/*:: :any):SST)*/; o.Strings.Count = 0; o.Strings.Unique = 0;
+	fix_write_opts(o);
+
+	o.cellXfs = [];
 	get_cell_style(o.cellXfs, {}, {revssf:{"General":0}});
+
+	if(!wb.Props) wb.Props = {};
 
 	for(var i = 0; i < wb.SheetNames.length; ++i) bufs[bufs.length] = write_ws_biff8(i, o, wb);
 	bufs.unshift(write_biff8_global(wb, bufs, o));

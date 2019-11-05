@@ -4,6 +4,7 @@ var HTML_ = (function() {
 		var opts = _opts || {};
 		if(DENSE != null && opts.dense == null) opts.dense = DENSE;
 		var ws/*:Worksheet*/ = opts.dense ? ([]/*:any*/) : ({}/*:any*/);
+		str = str.replace(/<!--.*?-->/g, "");
 		var mtch/*:any*/ = str.match(/<table/i);
 		if(!mtch) throw new Error("Invalid HTML: could not find <table>");
 		var mtch2/*:any*/ = str.match(/<\/table/i);
@@ -15,22 +16,26 @@ var HTML_ = (function() {
 		for(i = 0; i < rows.length; ++i) {
 			var row = rows[i].trim();
 			var hd = row.slice(0,3).toLowerCase();
-			if(hd == "<tr") { ++R; C = 0; continue; }
-			if(hd != "<td") continue;
-			var cells = row.split(/<\/td>/i);
+			if(hd == "<tr") { ++R; if(opts.sheetRows && opts.sheetRows <= R) { --R; break; } C = 0; continue; }
+			if(hd != "<td" && hd != "<th") continue;
+			var cells = row.split(/<\/t[dh]>/i);
 			for(j = 0; j < cells.length; ++j) {
 				var cell = cells[j].trim();
-				if(cell.slice(0,3).toLowerCase() != "<td") continue;
+				if(!cell.match(/<t[dh]/i)) continue;
 				var m = cell, cc = 0;
 				/* TODO: parse styles etc */
 				while(m.charAt(0) == "<" && (cc = m.indexOf(">")) > -1) m = m.slice(cc+1);
+				for(var midx = 0; midx < merges.length; ++midx) {
+					var _merge/*:Range*/ = merges[midx];
+					if(_merge.s.c == C && _merge.s.r < R && R <= _merge.e.r) { C = _merge.e.c + 1; midx = -1; }
+				}
 				var tag = parsexmltag(cell.slice(0, cell.indexOf(">")));
 				CS = tag.colspan ? +tag.colspan : 1;
-				if((RS = +tag.rowspan)>0 || CS>1) merges.push({s:{r:R,c:C},e:{r:R + (RS||1) - 1, c:C + CS - 1}});
+				if((RS = +tag.rowspan)>1 || CS>1) merges.push({s:{r:R,c:C},e:{r:R + (RS||1) - 1, c:C + CS - 1}});
 				var _t/*:string*/ = tag.t || "";
 				/* TODO: generate stub cells */
 				if(!m.length) { C += CS; continue; }
-				m = htmldecode(unescapexml(m));
+				m = htmldecode(m);
 				if(range.s.r > R) range.s.r = R; if(range.e.r < R) range.e.r = R;
 				if(range.s.c > C) range.s.c = C; if(range.e.c < C) range.e.c = C;
 				if(!m.length) continue;
@@ -50,6 +55,7 @@ var HTML_ = (function() {
 			}
 		}
 		ws['!ref'] = encode_range(range);
+		if(merges.length) ws["!merges"] = merges;
 		return ws;
 	}
 	function html_to_book(str/*:string*/, opts)/*:Workbook*/ {
@@ -58,7 +64,6 @@ var HTML_ = (function() {
 	function make_html_row(ws/*:Worksheet*/, r/*:Range*/, R/*:number*/, o/*:Sheet2HTMLOpts*/)/*:string*/ {
 		var M/*:Array<Range>*/ = (ws['!merges'] ||[]);
 		var oo/*:Array<string>*/ = [];
-		var nullcell = "<td>" + (o.editable ? '<span contenteditable="true"></span>' : "" ) + "</td>";
 		for(var C = r.s.c; C <= r.e.c; ++C) {
 			var RS = 0, CS = 0;
 			for(var j = 0; j < M.length; ++j) {
@@ -70,15 +75,14 @@ var HTML_ = (function() {
 			if(RS < 0) continue;
 			var coord = encode_cell({r:R,c:C});
 			var cell = o.dense ? (ws[R]||[])[C] : ws[coord];
-			if(!cell || cell.v == null) { oo.push(nullcell); continue; }
 			/* TODO: html entities */
-			var w = cell.h || escapexml(cell.w || (format_cell(cell), cell.w) || "");
-			var sp = {};
+			var w = (cell && cell.v != null) && (cell.h || escapehtml(cell.w || (format_cell(cell), cell.w) || "")) || "";
+			var sp = ({}/*:any*/);
 			if(RS > 1) sp.rowspan = RS;
 			if(CS > 1) sp.colspan = CS;
-			sp.t = cell.t;
+			sp.t = cell && cell.t || 'z';
 			if(o.editable) w = '<span contenteditable="true">' + w + '</span>';
-			sp.id = "sjs-" + coord;
+			sp.id = (o.id || "sjs") + "-" + coord;
 			oo.push(writextag('td', w, sp));
 		}
 		var preamble = "<tr>";
@@ -119,14 +123,22 @@ function parse_dom_table(table/*:HTMLElement*/, _opts/*:?any*/)/*:Worksheet*/ {
 	if(DENSE != null) opts.dense = DENSE;
 	var ws/*:Worksheet*/ = opts.dense ? ([]/*:any*/) : ({}/*:any*/);
 	var rows/*:HTMLCollection<HTMLTableRowElement>*/ = table.getElementsByTagName('tr');
-	var range/*:Range*/ = {s:{r:0,c:0},e:{r:rows.length - 1,c:0}};
+	var sheetRows = opts.sheetRows || 10000000;
+	var range/*:Range*/ = {s:{r:0,c:0},e:{r:0,c:0}};
 	var merges/*:Array<Range>*/ = [], midx = 0;
-	var R = 0, _C = 0, C = 0, RS = 0, CS = 0;
-	for(; R < rows.length; ++R) {
-		var row/*:HTMLTableRowElement*/ = rows[R];
+	var rowinfo/*:Array<RowInfo>*/ = [];
+	var _R = 0, R = 0, _C = 0, C = 0, RS = 0, CS = 0;
+	for(; _R < rows.length && R < sheetRows; ++_R) {
+		var row/*:HTMLTableRowElement*/ = rows[_R];
+		if (is_dom_element_hidden(row)) {
+			if (opts.display) continue;
+			rowinfo[R] = {hidden: true};
+		}
 		var elts/*:HTMLCollection<HTMLTableCellElement>*/ = (row.children/*:any*/);
 		for(_C = C = 0; _C < elts.length; ++_C) {
-			var elt/*:HTMLTableCellElement*/ = elts[_C], v = htmldecode(elts[_C].innerHTML);
+			var elt/*:HTMLTableCellElement*/ = elts[_C];
+			if (opts.display && is_dom_element_hidden(elt)) continue;
+			var v/*:string*/ = htmldecode(elt.innerHTML);
 			for(midx = 0; midx < merges.length; ++midx) {
 				var m/*:Range*/ = merges[midx];
 				if(m.s.c == C && m.s.r <= R && R <= m.e.r) { C = m.e.c+1; midx = -1; }
@@ -153,12 +165,33 @@ function parse_dom_table(table/*:HTMLElement*/, _opts/*:?any*/)/*:Worksheet*/ {
 			if(range.e.c < C) range.e.c = C;
 			C += CS;
 		}
+		++R;
 	}
-	ws['!merges'] = merges;
+	if(merges.length) ws['!merges'] = merges;
+	if(rowinfo.length) ws['!rows'] = rowinfo;
+	range.e.r = R - 1;
 	ws['!ref'] = encode_range(range);
+	if(R >= sheetRows) ws['!fullref'] = encode_range((range.e.r = rows.length-_R+R-1,range)); // We can count the real number of rows to parse but we don't to improve the performance
 	return ws;
 }
 
 function table_to_book(table/*:HTMLElement*/, opts/*:?any*/)/*:Workbook*/ {
 	return sheet_to_workbook(parse_dom_table(table, opts), opts);
+}
+
+function is_dom_element_hidden(element/*:HTMLElement*/)/*:boolean*/ {
+	var display/*:string*/ = '';
+	var get_computed_style/*:?function*/ = get_get_computed_style_function(element);
+	if(get_computed_style) display = get_computed_style(element).getPropertyValue('display');
+	if(!display) display = element.style.display; // Fallback for cases when getComputedStyle is not available (e.g. an old browser or some Node.js environments) or doesn't work (e.g. if the element is not inserted to a document)
+	return display === 'none';
+}
+
+/* global getComputedStyle */
+function get_get_computed_style_function(element/*:HTMLElement*/)/*:?function*/ {
+	// The proper getComputedStyle implementation is the one defined in the element window
+	if(element.ownerDocument.defaultView && typeof element.ownerDocument.defaultView.getComputedStyle === 'function') return element.ownerDocument.defaultView.getComputedStyle;
+	// If it is not available, try to get one from the global namespace
+	if(typeof getComputedStyle === 'function') return getComputedStyle;
+	return null;
 }
